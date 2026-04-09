@@ -1,0 +1,352 @@
+name: Fuego Wallet V10 Desktop (xfgCdswaps)
+
+on:
+  push:
+    branches: [xfgCdswaps, master, HEATMINT]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  FUEGO_SUITE_BRANCH: "xfgCdswaps"
+
+jobs:
+  # ─────────────────────────────────────────────
+  #  macOS Build
+  # ─────────────────────────────────────────────
+  build-macos:
+    name: Build V10 (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: native/crypto
+
+      - name: Build Rust crypto library
+        run: |
+          cd native/crypto
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+
+      - name: Copy Rust library to assets
+        run: |
+          mkdir -p assets/bin
+          cp native/crypto/target/aarch64-apple-darwin/release/libfuego_crypto.dylib assets/bin/libfuego_crypto-arm64.dylib || true
+          cp native/crypto/target/x86_64-apple-darwin/release/libfuego_crypto.dylib assets/bin/libfuego_crypto-x86_64.dylib || true
+
+      - name: Enable macOS desktop support
+        run: flutter config --enable-macos-desktop
+
+      - name: Download xfg-stark-cli
+        run: |
+          curl -fSL -o xfg-stark-cli-macos.tar.gz \
+            "https://github.com/ColinRitman/xfgwin/releases/download/v0.8.8/xfg-stark-cli-macos.tar.gz" || true
+          if [ -f xfg-stark-cli-macos.tar.gz ]; then
+            tar -xzf xfg-stark-cli-macos.tar.gz || true
+            mkdir -p assets/bin
+            BINARY_PATH=$(find . -maxdepth 2 -type f -name "xfg-stark-cli*" ! -name "*.tar.gz" | head -n1)
+            if [ -n "$BINARY_PATH" ]; then
+              chmod +x "$BINARY_PATH"
+              mv "$BINARY_PATH" assets/bin/xfg-stark-cli-macos
+            fi
+            rm -f xfg-stark-cli-macos.tar.gz
+          fi
+          touch assets/bin/.binaries-checked
+
+      - name: Build V10 fuego walletd from source
+        run: |
+          git clone --depth 1 -b ${{ env.FUEGO_SUITE_BRANCH }} https://github.com/usexfg/fuego-suite.git fuego-source || true
+          if [ -d fuego-source ]; then
+            cd fuego-source
+            brew install cmake pkg-config boost openssl zeromq jsoncpp || true
+
+            # Fix json include path (macOS sed syntax)
+            if [ -f src/CryptoNoteCore/ProofStructures.h ]; then
+              sed -i '' 's/#include <json\/json.h>/#include <jsoncpp\/json.h>/g' src/CryptoNoteCore/ProofStructures.h
+            fi
+
+            mkdir -p build && cd build
+            cmake .. -DBUILD_TESTS=OFF \
+              -DCMAKE_CXX_FLAGS="-I$(brew --prefix jsoncpp)/include -DPROJECT_VERSION_LONG=\"V10\"" \
+              -DJSONCPP_INCLUDE_DIR="$(brew --prefix jsoncpp)/include" || true
+            make -j$(sysctl -n hw.ncpu) PaymentGateService || true
+
+            # Copy walletd binary
+            WALLETD=$(find . -name "walletd" -type f -perm +111 2>/dev/null | head -1)
+            if [ -n "$WALLETD" ]; then
+              mkdir -p ../../assets/bin
+              cp "$WALLETD" ../../assets/bin/fuego-walletd-macos
+              chmod +x ../../assets/bin/fuego-walletd-macos
+            fi
+          fi
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Build macOS desktop app
+        run: flutter build macos --release
+
+      - name: Create app archive
+        run: |
+          cd build/macos/Build/Products/Release
+          APP_NAME=""
+          for name in "xfg_wallet.app" "fuego_wallet.app" "Fuego Wallet.app"; do
+            if [ -d "$name" ]; then
+              APP_NAME="$name"
+              break
+            fi
+          done
+          if [ -z "$APP_NAME" ]; then
+            APP_NAME=$(find . -name "*.app" -maxdepth 1 | head -1)
+          fi
+          if [ -n "$APP_NAME" ]; then
+            zip -r Fuego-Wallet-V10-macOS.zip "$APP_NAME"
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuego-wallet-v10-macos
+          path: build/macos/Build/Products/Release/Fuego-Wallet-V10-macOS.zip
+
+  # ─────────────────────────────────────────────
+  #  Windows Build
+  # ─────────────────────────────────────────────
+  build-windows:
+    name: Build V10 (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: native/crypto
+
+      - name: Build Rust crypto library
+        shell: pwsh
+        run: |
+          cd native\crypto
+          cargo build --release
+
+      - name: Copy Rust library to assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path assets\bin | Out-Null
+          $dllPath = Get-ChildItem -Path native\crypto\target\release -Filter "fuego_crypto.dll" -Recurse | Select-Object -First 1
+          if ($dllPath) {
+            Copy-Item $dllPath.FullName assets\bin\fuego_crypto.dll
+          }
+
+      - name: Enable Windows desktop support
+        run: flutter config --enable-windows-desktop
+
+      - name: Download xfg-stark-cli
+        shell: pwsh
+        run: |
+          try {
+            Invoke-WebRequest -Uri "https://github.com/ColinRitman/xfgwin/releases/download/v0.8.8/xfg-stark-cli-windows.zip" -OutFile xfg-stark-cli-windows.zip
+            Expand-Archive -Path xfg-stark-cli-windows.zip -DestinationPath xfg-extract -Force
+            New-Item -ItemType Directory -Force -Path assets\bin | Out-Null
+            $binary = Get-ChildItem -Path xfg-extract -Filter "xfg-stark-cli*.exe" -Recurse | Select-Object -First 1
+            if ($binary) {
+              Move-Item $binary.FullName assets\bin\xfg-stark-cli.exe
+            }
+          } catch {}
+
+      - name: Build V10 fuego walletd from source
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          git clone --depth 1 -b ${{ env.FUEGO_SUITE_BRANCH }} https://github.com/usexfg/fuego-suite.git fuego-source
+          if (Test-Path fuego-source) {
+            cd fuego-source
+            $proofFile = "src\CryptoNoteCore\ProofStructures.h"
+            if (Test-Path $proofFile) {
+              (Get-Content $proofFile) -replace '#include <json/json.h>', '#include <jsoncpp/json.h>' | Set-Content $proofFile
+            }
+            & C:\vcpkg\vcpkg.exe install boost-serialization:x64-windows boost-filesystem:x64-windows boost-program-options:x64-windows boost-date-time:x64-windows jsoncpp:x64-windows zeromq:x64-windows openssl:x64-windows 2>$null
+            mkdir build -ErrorAction SilentlyContinue
+            cd build
+            cmake .. -DBUILD_TESTS=OFF -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -A x64 2>$null
+            cmake --build . --config Release --target PaymentGateService 2>$null
+            $walletd = Get-ChildItem -Path . -Filter "walletd.exe" -Recurse | Select-Object -First 1
+            if ($walletd) {
+              New-Item -ItemType Directory -Force -Path ..\..\assets\bin | Out-Null
+              Copy-Item $walletd.FullName ..\..\assets\bin\fuego-walletd-windows.exe
+            }
+          }
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Build Windows desktop app
+        run: flutter build windows --release
+
+      - name: Create app archive
+        shell: pwsh
+        run: |
+          $paths = @("build\windows\x64\runner\Release", "build\windows\runner\Release")
+          $releasePath = $null
+          foreach ($p in $paths) { if (Test-Path $p) { $releasePath = $p; break } }
+          if ($releasePath) { Compress-Archive -Path "$releasePath\*" -DestinationPath "Fuego-Wallet-V10-Windows.zip" }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuego-wallet-v10-windows
+          path: Fuego-Wallet-V10-Windows.zip
+
+  # ─────────────────────────────────────────────
+  #  Linux Build
+  # ─────────────────────────────────────────────
+  build-linux:
+    name: Build V10 (Linux)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: native/crypto
+
+      - name: Build Rust crypto library
+        run: |
+          cd native/crypto
+          cargo build --release
+
+      - name: Copy Rust library to assets
+        run: |
+          mkdir -p assets/bin
+          cp native/crypto/target/release/libfuego_crypto.so assets/bin/libfuego_crypto.so || true
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libstdc++-12-dev
+          flutter config --enable-linux-desktop
+
+      - name: Download xfg-stark-cli
+        run: |
+          curl -fSL -o xfg-stark-cli-linux.tar.gz "https://github.com/ColinRitman/xfgwin/releases/download/v0.8.8/xfg-stark-cli-linux.tar.gz" || true
+          if [ -f xfg-stark-cli-linux.tar.gz ]; then
+            tar -xzf xfg-stark-cli-linux.tar.gz || true
+            mkdir -p assets/bin
+            BINARY_PATH=$(find . -maxdepth 2 -type f -name "xfg-stark-cli*" ! -name "*.tar.gz" | head -n1)
+            if [ -n "$BINARY_PATH" ]; then
+              chmod +x "$BINARY_PATH"
+              mv "$BINARY_PATH" assets/bin/xfg-stark-cli-linux
+            fi
+          fi
+          touch assets/bin/.binaries-checked
+
+      - name: Build V10 fuego walletd from source
+        run: |
+          sudo apt-get install -y build-essential git cmake libboost-all-dev libjsoncpp-dev libssl-dev libzmq3-dev
+          git clone --depth 1 -b ${{ env.FUEGO_SUITE_BRANCH }} https://github.com/usexfg/fuego-suite.git fuego-source || true
+          if [ -d fuego-source ]; then
+            cd fuego-source
+            if [ -f src/CryptoNoteCore/ProofStructures.h ]; then
+              sed -i 's/#include <json\/json.h>/#include <jsoncpp\/json.h>/g' src/CryptoNoteCore/ProofStructures.h
+            fi
+            mkdir -p build && cd build
+            cmake .. -DBUILD_TESTS=OFF -DCMAKE_CXX_FLAGS="-I/usr/include" || true
+            make -j$(nproc) PaymentGateService || true
+            WALLETD=$(find . -name "walletd" -type f -executable 2>/dev/null | head -1)
+            if [ -n "$WALLETD" ]; then
+              mkdir -p ../../assets/bin
+              cp "$WALLETD" ../../assets/bin/fuego-walletd
+              chmod +x ../../assets/bin/fuego-walletd
+            fi
+          fi
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Build Linux desktop app
+        run: flutter build linux --release
+
+      - name: Create tarball archive
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czf Fuego-Wallet-V10-Linux.tar.gz *
+
+      - name: Create AppImage
+        run: |
+          cd build/linux/x64/release/bundle
+          curl -fSL -o appimagetool-x86_64.AppImage "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool-x86_64.AppImage
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -r * AppDir/usr/bin/ 2>/dev/null || true
+          [ -d AppDir/usr/bin/lib ] && cp -r AppDir/usr/bin/lib/* AppDir/usr/lib/ 2>/dev/null || true
+          [ -d AppDir/usr/bin/data ] && (mkdir -p AppDir/usr/share && cp -r AppDir/usr/bin/data AppDir/usr/share/ 2>/dev/null || true)
+          touch AppDir/fuego-wallet.png
+          cat > AppDir/fuego-wallet.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Fuego Wallet V10
+          Exec=fuego_wallet
+          Icon=fuego-wallet
+          Categories=Finance;
+          EOF
+          cp AppDir/fuego-wallet.desktop AppDir/usr/share/applications/
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/bin/lib:${LD_LIBRARY_PATH}"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/fuego_wallet" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --no-appstream AppDir Fuego-Wallet-V10-Linux.AppImage || true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuego-wallet-v10-linux
+          path: |
+            build/linux/x64/release/bundle/Fuego-Wallet-V10-Linux.tar.gz
+            build/linux/x64/release/bundle/Fuego-Wallet-V10-Linux.AppImage
