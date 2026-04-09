@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Fuego Developers
+// Copyright (c) 2025-2026 Elderfire Privacy Group
+
 import 'package:json_annotation/json_annotation.dart';
+import 'fuego_constants.dart';
 
 part 'wallet.g.dart';
 
@@ -9,6 +13,8 @@ class Wallet {
   final String spendKey;
   final int balance;
   final int unlockedBalance;
+  final int lockedDepositBalance;
+  final int unlockedDepositBalance;
   final int blockchainHeight;
   final int localHeight;
   final bool synced;
@@ -19,6 +25,8 @@ class Wallet {
     required this.spendKey,
     required this.balance,
     required this.unlockedBalance,
+    this.lockedDepositBalance = 0,
+    this.unlockedDepositBalance = 0,
     required this.blockchainHeight,
     required this.localHeight,
     required this.synced,
@@ -33,6 +41,8 @@ class Wallet {
     String? spendKey,
     int? balance,
     int? unlockedBalance,
+    int? lockedDepositBalance,
+    int? unlockedDepositBalance,
     int? blockchainHeight,
     int? localHeight,
     bool? synced,
@@ -43,18 +53,26 @@ class Wallet {
       spendKey: spendKey ?? this.spendKey,
       balance: balance ?? this.balance,
       unlockedBalance: unlockedBalance ?? this.unlockedBalance,
+      lockedDepositBalance: lockedDepositBalance ?? this.lockedDepositBalance,
+      unlockedDepositBalance: unlockedDepositBalance ?? this.unlockedDepositBalance,
       blockchainHeight: blockchainHeight ?? this.blockchainHeight,
       localHeight: localHeight ?? this.localHeight,
       synced: synced ?? this.synced,
     );
   }
 
-  // Convert atomic units to XFG (assuming 8 decimal places)
-  double get balanceXFG => balance / 10000000.0;
-  double get unlockedBalanceXFG => unlockedBalance / 10000000.0;
-  
+  // Convert atomic units to XFG (7 decimal places)
+  double get balanceXFG => FuegoConstants.toXFG(balance);
+  double get unlockedBalanceXFG => FuegoConstants.toXFG(unlockedBalance);
+  double get lockedDepositXFG => FuegoConstants.toXFG(lockedDepositBalance);
+  double get unlockedDepositXFG => FuegoConstants.toXFG(unlockedDepositBalance);
+
+  /// Total balance including deposits.
+  int get totalBalance => balance + lockedDepositBalance + unlockedDepositBalance;
+  double get totalBalanceXFG => FuegoConstants.toXFG(totalBalance);
+
   // Sync progress percentage
-  double get syncProgress => 
+  double get syncProgress =>
       blockchainHeight > 0 ? (localHeight / blockchainHeight).clamp(0.0, 1.0) : 0.0;
 }
 
@@ -69,6 +87,8 @@ class WalletTransaction {
   final bool isSpending;
   final String? address;
   final int confirmations;
+  final int firstDepositId;
+  final int depositCount;
 
   const WalletTransaction({
     required this.txid,
@@ -80,16 +100,21 @@ class WalletTransaction {
     required this.isSpending,
     this.address,
     required this.confirmations,
+    this.firstDepositId = -1,
+    this.depositCount = 0,
   });
 
-  factory WalletTransaction.fromJson(Map<String, dynamic> json) => 
+  factory WalletTransaction.fromJson(Map<String, dynamic> json) =>
       _$WalletTransactionFromJson(json);
   Map<String, dynamic> toJson() => _$WalletTransactionToJson(this);
 
   // Convert atomic units to XFG
-  double get amountXFG => amount / 10000000.0;
-  double get feeXFG => fee / 10000000.0;
-  
+  double get amountXFG => FuegoConstants.toXFG(amount.abs());
+  double get feeXFG => FuegoConstants.toXFG(fee);
+
+  /// True if this transaction created or interacted with a deposit.
+  bool get hasDeposit => depositCount > 0;
+
   // Get transaction status
   TransactionStatus get status {
     if (confirmations == 0) return TransactionStatus.pending;
@@ -114,40 +139,11 @@ class SendTransactionRequest {
     required this.address,
     required this.amount,
     required this.paymentId,
-    required this.fee,
-    this.mixins = 8, // Default ring size
+    this.fee = FuegoConstants.MINIMUM_FEE,          // 8000 (0.0008 XFG)
+    this.mixins = FuegoConstants.MIN_TX_MIXIN_SIZE_V10, // 8 (v10+ enforced)
   });
 
-  factory SendTransactionRequest.fromJson(Map<String, dynamic> json) => 
+  factory SendTransactionRequest.fromJson(Map<String, dynamic> json) =>
       _$SendTransactionRequestFromJson(json);
   Map<String, dynamic> toJson() => _$SendTransactionRequestToJson(this);
-}
-
-@JsonSerializable()
-class ElderfierNode {
-  final String nodeId;
-  final String customName;
-  final String address;
-  final int stakeAmount;
-  final bool isActive;
-  final int uptime;
-  final int lastSeenBlock;
-  final String consensusType;
-
-  const ElderfierNode({
-    required this.nodeId,
-    required this.customName,
-    required this.address,
-    required this.stakeAmount,
-    required this.isActive,
-    required this.uptime,
-    required this.lastSeenBlock,
-    required this.consensusType,
-  });
-
-  factory ElderfierNode.fromJson(Map<String, dynamic> json) => 
-      _$ElderfierNodeFromJson(json);
-  Map<String, dynamic> toJson() => _$ElderfierNodeToJson(this);
-
-  double get stakeAmountXFG => stakeAmount / 10000000.0;
 }

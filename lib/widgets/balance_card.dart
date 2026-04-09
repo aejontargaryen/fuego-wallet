@@ -152,25 +152,47 @@ class _BalanceCardState extends State<BalanceCard>
                     const SizedBox(height: 12),
 
                     // Available balance
-                    if (!isLoading && wallet != null)
+                    if (!isLoading && wallet != null) ...[
                       Row(
                         children: [
                           const Icon(
                             Icons.check_circle_outline,
                             color: Colors.white,
-                            size: 16,
+                            size: 14,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Available: ${_showBalance ? '${wallet.unlockedBalanceXFG.toStringAsFixed(8)} XFG' : '••••••••'}',
+                            'Available: ${_showBalance ? '${wallet.unlockedBalanceXFG.toStringAsFixed(7)} XFG' : '••••••••'}',
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.9),
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w400,
                             ),
                           ),
                         ],
                       ),
+                      if (wallet.lockedDepositBalance > 0 || wallet.unlockedDepositBalance > 0) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.lock_outline,
+                              color: Colors.white70,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Locked in CDs: ${_showBalance ? '${(wallet.lockedDepositXFG + wallet.unlockedDepositXFG).toStringAsFixed(7)} XFG' : '••••••••'}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
 
                     const SizedBox(height: 16),
 

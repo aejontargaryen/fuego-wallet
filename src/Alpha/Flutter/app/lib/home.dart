@@ -1,16 +1,7 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:ui';
 import 'dart:core';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:uuid/uuid.dart';
-import 'package:app/main.dart';
 import 'package:app/utils/polariscode_util.dart' as util;
-import 'package:app/utils/polaris_code_language.dart';
-import 'package:app/utils/global.dart';
 
 class Home extends StatefulWidget {
   Home({super.key }){

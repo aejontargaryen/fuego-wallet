@@ -209,7 +209,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'We\'ll generate a unique 25-word backup phrase for your wallet. This phrase is the ONLY way to recover your wallet if you lose access to your device.',
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -239,13 +239,13 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
                 color: AppTheme.successColor.withOpacity(0.3),
               ),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.check_circle,
                   color: AppTheme.successColor,
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'Your backup phrase will be generated securely on this device and never transmitted over the internet.',
@@ -277,7 +277,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'Write down these 25 words in the exact order shown',
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -342,7 +342,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'Tap each word in the correct order to confirm you\'ve saved your backup phrase',
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -400,13 +400,13 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
                 color: AppTheme.primaryColor.withOpacity(0.3),
               ),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.info,
                   color: AppTheme.primaryColor,
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'Tap all words to confirm you have safely stored your backup phrase.',
@@ -495,7 +495,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
                   point,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 14,
                     color: AppTheme.textSecondary,
                   ),

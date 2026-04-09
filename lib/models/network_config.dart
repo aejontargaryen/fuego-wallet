@@ -1,3 +1,10 @@
+// Copyright (c) 2025-2026 Fuego Developers
+// Copyright (c) 2025-2026 Elderfire Privacy Group
+//
+// Network configuration — seed nodes and ports from CryptoNoteConfig.h
+
+import 'fuego_constants.dart';
+
 enum NetworkType {
   mainnet,
   testnet,
@@ -8,59 +15,54 @@ class NetworkConfig {
   final String name;
   final String addressPrefix;
   final String networkId;
+  final int p2pPort;
   final int daemonRpcPort;
   final int walletRpcPort;
   final List<String> seedNodes;
-  final String? explorerUrl;
-  final String? faucetUrl;
 
   const NetworkConfig({
     required this.type,
     required this.name,
     required this.addressPrefix,
     required this.networkId,
+    required this.p2pPort,
     required this.daemonRpcPort,
     required this.walletRpcPort,
     required this.seedNodes,
-    this.explorerUrl,
-    this.faucetUrl,
   });
 
-  // Mainnet configuration
+  // Mainnet configuration — values from CryptoNoteConfig.h
   static const NetworkConfig mainnet = NetworkConfig(
     type: NetworkType.mainnet,
     name: 'Fuego Mainnet',
     addressPrefix: 'fire',
     networkId: 'fuego-mainnet',
-    daemonRpcPort: 18180,
-    walletRpcPort: 8070,
+    p2pPort: FuegoConstants.MAINNET_P2P_PORT,     // 10808
+    daemonRpcPort: FuegoConstants.MAINNET_RPC_PORT, // 18180
+    walletRpcPort: 18181,                           // PaymentGate convention: rpc+1
     seedNodes: [
-      '207.244.247.64:18180',
-      'node1.usexfg.org:18180',
-      'node2.usexfg.org:18180',
-      'fuego.seednode1.com:18180',
-      'fuego.seednode2.com:18180',
-      'fuego.communitynode.net:18180',
+      '207.244.247.64:10808',
+      '195.88.57.158:10808',
+      '80.89.228.157:10808',
+      '216.145.84.248:10808',
     ],
-    explorerUrl: 'https://explorer.usexfg.org',
   );
 
-  // Testnet configuration
+  // Testnet configuration — values from CryptoNoteConfig.h
   static const NetworkConfig testnet = NetworkConfig(
     type: NetworkType.testnet,
     name: 'Fuego Testnet',
     addressPrefix: 'TEST',
     networkId: 'fuego-testnet',
-    daemonRpcPort: 20808,
-    walletRpcPort: 28280,
+    p2pPort: FuegoConstants.TESTNET_P2P_PORT,       // 20808
+    daemonRpcPort: FuegoConstants.TESTNET_RPC_PORT,  // 28280
+    walletRpcPort: 28281,                             // PaymentGate convention: rpc+1
     seedNodes: [
-      'testnet1.usexfg.org:20808',
-      'testnet2.usexfg.org:20808',
-      'fuego-testnet.seednode1.com:20808',
-      'fuego-testnet.seednode2.com:20808',
+      '195.88.57.158:20808',
+      '216.145.84.248:20808',
+      '80.89.228.157:20808',
+      '207.244.247.64:20808',
     ],
-    explorerUrl: 'https://testnet-explorer.usexfg.org',
-    faucetUrl: 'https://testnet-faucet.usexfg.org',
   );
 
   // Get configuration by type
@@ -78,21 +80,38 @@ class NetworkConfig {
     return [mainnet, testnet];
   }
 
-  // Check if this is testnet
-  bool get isTestnet => type == NetworkType.testnet;
+  // Get default daemon RPC endpoints (for remote node connection)
+  List<String> get defaultDaemonNodes {
+    return seedNodes.map((seed) {
+      final host = seed.split(':').first;
+      return '$host:$daemonRpcPort';
+    }).toList();
+  }
 
-  // Check if this is mainnet
+  bool get isTestnet => type == NetworkType.testnet;
   bool get isMainnet => type == NetworkType.mainnet;
 
-  // Get formatted network info
   String get networkInfo => '$name ($networkId)';
-
-  // Get default seed node
   String get defaultSeedNode => seedNodes.isNotEmpty ? seedNodes.first : '';
+
+  /// Get CD term range for this network.
+  ({int min, int max}) get cdTermRange =>
+      FuegoConstants.getCDTermRange(testnet: isTestnet);
+
+  /// Get tier amounts for this network.
+  List<int> get tierAmounts =>
+      FuegoConstants.getTierAmounts(testnet: isTestnet);
+
+  /// Get minimum fee for this network.
+  int get minimumFee => FuegoConstants.MINIMUM_FEE;
+
+  /// Get minimum mixin for this network.
+  int get minimumMixin => FuegoConstants.MIN_TX_MIXIN_SIZE_V10;
 
   @override
   String toString() {
-    return 'NetworkConfig(type: $type, name: $name, daemonPort: $daemonRpcPort, walletPort: $walletRpcPort)';
+    return 'NetworkConfig(type: $type, name: $name, '
+        'p2p: $p2pPort, rpc: $daemonRpcPort, walletRpc: $walletRpcPort)';
   }
 
   @override

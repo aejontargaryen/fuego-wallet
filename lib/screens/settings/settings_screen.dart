@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/wallet_provider.dart';
-import '../../services/fuego_rpc_service.dart';
 import '../../services/security_service.dart';
-import '../../models/network_config.dart';
 import '../../utils/theme.dart';
 import '../wallet_setup/setup_screen.dart';
 import 'network_selection_screen.dart';
+import 'alias_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -90,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'This will permanently remove your wallet from this device. Make sure you have your backup phrase saved!',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
@@ -104,14 +103,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: AppTheme.errorColor.withOpacity(0.3),
                   ),
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.warning,
                       color: AppTheme.errorColor,
                       size: 20,
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'This action cannot be undone!',
@@ -178,7 +177,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showNodeSelectionDialog() {
     final TextEditingController customNodeController = TextEditingController();
-    String selectedNode = FuegoRPCService.defaultRemoteNodes.first;
+    final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+    final remoteNodes = walletProvider.networkConfig.defaultDaemonNodes;
+    String selectedNode = remoteNodes.isNotEmpty ? remoteNodes.first : '';
 
     showDialog(
       context: context,
@@ -218,7 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: AppTheme.textSecondary),
                   ),
                   const SizedBox(height: 16),
-                  ...FuegoRPCService.defaultRemoteNodes.map((node) => RadioListTile<String>(
+                  ...remoteNodes.map((node) => RadioListTile<String>(
                     title: Text(
                       node,
                       style: const TextStyle(color: AppTheme.textPrimary),
@@ -247,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       enabledBorder: OutlineInputBorder(
                         borderSide: BorderSide(color: AppTheme.textSecondary.withOpacity(0.3)),
                       ),
-                      focusedBorder: OutlineInputBorder(
+                      focusedBorder: const OutlineInputBorder(
                         borderSide: BorderSide(color: AppTheme.primaryColor),
                       ),
                     ),
@@ -265,7 +266,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: Text(
+                  child: const Text(
                     'Cancel',
                     style: TextStyle(color: AppTheme.textSecondary),
                   ),
@@ -331,7 +332,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
-          content: Column(
+          content: const Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -343,24 +344,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Text(
                 'A privacy-focused cryptocurrency wallet for XF₲ (XFG)',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
-              const SizedBox(height: 16),
-              const Text(
+              SizedBox(height: 16),
+              Text(
                 'Features:',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Text(
                 '• Private transactions with ring signatures\n'
                 '• Encrypted blockchain messaging\n'
-                '• Elderfier node participation\n'
+                '• FuegoCD on-chain deposit banking\n'
+                '• Atomic swap fee pool yield\n'
+                '• Fire Alias registration\n'
                 '• Built-in mining capabilities\n'
                 '• Advanced security features',
                 style: TextStyle(
@@ -411,6 +414,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'View your wallet backup phrase',
                 onTap: () {
                   // TODO: Show backup phrase with authentication
+                },
+                trailing: const Icon(Icons.chevron_right),
+              ),
+              _buildSettingsTile(
+                icon: Icons.alternate_email,
+                title: 'Fire Alias',
+                subtitle: 'Manage your @fire handle',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (context) => const AliasScreen()),
+                  );
                 },
                 trailing: const Icon(Icons.chevron_right),
               ),
@@ -645,7 +659,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         subtitle: Text(
           subtitle,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 14,
             color: AppTheme.textSecondary,
           ),

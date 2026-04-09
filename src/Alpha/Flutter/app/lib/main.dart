@@ -8,7 +8,6 @@ import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:app/utils/polariscode_util.dart' as util;
 import 'package:app/utils/polaris_code_language.dart';
 import 'package:app/utils/global.dart';

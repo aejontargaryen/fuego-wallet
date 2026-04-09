@@ -24,7 +24,7 @@ class FuegoWalletAdapter {
 
   final Dio _dio;
   final String _walletRpcUrl;
-  NetworkConfig _networkConfig;
+  final NetworkConfig _networkConfig;
   Wallet? _wallet;
   bool _isOpen = false;
   bool _isSynchronized = false;
@@ -73,7 +73,7 @@ class FuegoWalletAdapter {
       }
 
       _isOpen = true;
-      await _startSync();
+      _startSync();
       _emitEvent(WalletEvent.opened());
       return true;
     } catch (e) {
@@ -115,7 +115,7 @@ class FuegoWalletAdapter {
       }
 
       _isOpen = true;
-      await _startSync();
+      _startSync();
       _emitEvent(WalletEvent.created());
       return true;
     } catch (e) {
@@ -161,7 +161,7 @@ class FuegoWalletAdapter {
       }
 
       _isOpen = true;
-      await _startSync();
+      _startSync();
       _emitEvent(WalletEvent.opened());
       return true;
     } catch (e) {

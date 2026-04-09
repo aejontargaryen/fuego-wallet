@@ -1,12 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:ionicons/ionicons.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-import 'dart:html' as html;
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:animated_tree_view/animated_tree_view.dart';
-import 'package:app/utils/polariscode_util.dart';
-import 'package:app/utils/polaris_code_language.dart';
 
 
 

@@ -43,31 +43,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _initializeWallet() async {
-    final walletProvider = Provider.of<WalletProvider>(context, listen: false);
-    await walletProvider.refreshWallet();
-    await walletProvider.refreshTransactions();
+    final p = Provider.of<WalletProvider>(context, listen: false);
+    await p.refreshWallet();
+    // Fire remaining refreshes in parallel to keep startup fast
+    await Future.wait([
+      p.refreshTransactions(),
+      p.refreshDeposits(),
+      p.refreshFeePool(),
+      p.refreshSupplyStats(),
+      p.refreshMyAlias(),
+    ]);
   }
 
   Future<void> _onRefresh() async {
     if (_isRefreshing) return;
-    
-    setState(() {
-      _isRefreshing = true;
-    });
-    
+    setState(() => _isRefreshing = true);
     _refreshController.forward();
-    
+
     try {
-      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final p = Provider.of<WalletProvider>(context, listen: false);
       await Future.wait([
-        walletProvider.refreshWallet(),
-        walletProvider.refreshTransactions(),
+        p.refreshWallet(),
+        p.refreshTransactions(),
+        p.refreshDeposits(),
+        p.refreshFeePool(),
+        p.refreshSupplyStats(),
+        p.refreshMyAlias(),
       ]);
     } finally {
       _refreshController.reset();
-      setState(() {
-        _isRefreshing = false;
-      });
+      setState(() => _isRefreshing = false);
     }
   }
 
@@ -114,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       mainAxisAlignment: MainAxisAlignment.end,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           'XF₲ Wallet',
                           style: TextStyle(
                             color: AppTheme.textPrimary,
@@ -212,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       size: 20,
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
+                                    const Text(
                                       'Synchronizing Blockchain',
                                       style: TextStyle(
                                         color: AppTheme.textPrimary,
@@ -222,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     const Spacer(),
                                     Text(
                                       '${(wallet.syncProgress * 100).toStringAsFixed(1)}%',
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         color: AppTheme.textSecondary,
                                         fontSize: 12,
                                       ),
@@ -243,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 const SizedBox(height: 8),
                                 Text(
                                   '${wallet.wallet?.localHeight ?? 0} / ${wallet.wallet?.blockchainHeight ?? 0} blocks',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     color: AppTheme.textMuted,
                                     fontSize: 11,
                                   ),
@@ -292,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       ),
                                       Text(
                                         '${wallet.miningSpeed} H/s with ${wallet.miningThreads} threads',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           color: AppTheme.textSecondary,
                                           fontSize: 12,
                                         ),
@@ -357,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  const Text(
                     'Choose the number of CPU threads to use for mining:',
                     style: TextStyle(color: AppTheme.textSecondary),
                   ),

@@ -1,5 +1,5 @@
-// Copyright (c) 2025 Fuego Developers
-// Copyright (c) 2025 Elderfire Privacy Group
+// Copyright (c) 2025-2026 Fuego Developers
+// Copyright (c) 2025-2026 Elderfire Privacy Group
 
 import 'dart:async';
 import 'dart:io';
@@ -18,6 +18,8 @@ class WalletDaemonService {
   static String? _walletPath;
   static String? _daemonAddress;
   static int? _daemonPort;
+  static final List<String> _logBuffer = [];
+  static const int _maxLogLines = 500;
 
   /// Initialize the wallet daemon service
   static Future<void> initialize({
@@ -44,21 +46,39 @@ class WalletDaemonService {
 
   /// Extract the walletd binary from assets
   static Future<String> _extractWalletdBinary() async {
-    final Directory tempDir = await getTemporaryDirectory();
+    final Directory appDir = await getApplicationSupportDirectory();
     final String binaryName = Platform.isWindows
         ? 'fuego-walletd-windows.exe'
         : Platform.isMacOS
             ? 'fuego-walletd-macos'
             : 'fuego-walletd-linux';
 
-    final File binaryFile = File(path.join(tempDir.path, 'fuego-walletd'));
+    final String binDir = path.join(appDir.path, 'bin');
+    await Directory(binDir).create(recursive: true);
+
+    final File binaryFile = File(path.join(binDir, 'fuego-walletd'));
 
     // Extract from assets if not already extracted
     if (!await binaryFile.exists()) {
-      await binaryFile.create(recursive: true);
-      await binaryFile.writeAsBytes(
-        await rootBundle.load('assets/bin/$binaryName').then((data) => data.buffer.asUint8List())
-      );
+      try {
+        await binaryFile.create(recursive: true);
+        await binaryFile.writeAsBytes(
+          await rootBundle.load('assets/bin/$binaryName').then((data) => data.buffer.asUint8List())
+        );
+      } catch (e) {
+        debugPrint('Warning: walletd binary not bundled in assets: $e');
+        // Check if the binary exists on the system PATH
+        try {
+          final which = await Process.run('which', ['fuego-walletd']);
+          if (which.exitCode == 0) {
+            return which.stdout.toString().trim();
+          }
+        } catch (execError) {
+          debugPrint('Failed to execute which command: $execError');
+        }
+        debugPrint('Running in UI-only or external RPC mode. Skipping walletd process.');
+        return '';
+      }
     }
 
     // Set executable permissions for non-Windows platforms
@@ -83,15 +103,25 @@ class WalletDaemonService {
       throw Exception('WalletDaemonService not initialized');
     }
 
+    if (_walletdPath!.isEmpty) {
+      debugPrint('Skipping walletd start: running in UI-only/external RPC mode');
+      return false; // Assuming it will be managed externally
+    }
+
     try {
       // Prepare command arguments
       final List<String> args = [
         '--daemon-address', '$_daemonAddress',
-        '--daemon-port', '$_daemonPort.toString()',
+        '--daemon-port', '$_daemonPort',
         '--rpc-bind-port', '${_networkConfig.walletRpcPort}',
-        '--log-level', '1', // Info level
+        '--log-level', '1',
         '--non-interactive',
       ];
+
+      // Add testnet flag if applicable
+      if (_networkConfig.isTestnet) {
+        args.add('--testnet');
+      }
 
       // Add wallet path if provided
       if (walletPath != null) {
@@ -110,23 +140,40 @@ class WalletDaemonService {
 
       // Listen to stdout and stderr
       _walletdProcess!.stdout.transform(utf8.decoder).listen((data) {
+        _appendLog('stdout: $data');
         debugPrint('Walletd stdout: $data');
       });
 
       _walletdProcess!.stderr.transform(utf8.decoder).listen((data) {
+        _appendLog('stderr: $data');
         debugPrint('Walletd stderr: $data');
       });
 
-      // Wait a moment for startup
-      await Future.delayed(const Duration(seconds: 2));
+      // Monitor process exit
+      _walletdProcess!.exitCode.then((code) {
+        _isRunning = false;
+        _appendLog('Walletd exited with code $code');
+        debugPrint('Walletd exited with code $code');
+      });
 
-      // Check if process is still running
-      if (_walletdProcess!.exitCode == null) {
+      // Wait a moment for startup
+      await Future.delayed(const Duration(seconds: 3));
+
+      // Check if process is still running by trying to get exit code
+      // If the process has already exited, exitCode completes immediately
+      final exitCodeFuture = _walletdProcess!.exitCode;
+      final result = await Future.any([
+        exitCodeFuture.then((code) => false),
+        Future.delayed(const Duration(milliseconds: 500), () => true),
+      ]);
+
+      if (result) {
         _isRunning = true;
-        debugPrint('Walletd started successfully on port ${_networkConfig.walletRpcPort}');
+        debugPrint('Walletd started successfully');
         return true;
       } else {
-        debugPrint('Walletd failed to start');
+        debugPrint('Walletd failed to start (process exited immediately)');
+        _walletdProcess = null;
         return false;
       }
     } catch (e) {
@@ -143,12 +190,21 @@ class WalletDaemonService {
 
     try {
       _walletdProcess!.kill();
-      await _walletdProcess!.exitCode;
+      await _walletdProcess!.exitCode.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          // Force kill if it doesn't exit cleanly
+          _walletdProcess!.kill(ProcessSignal.sigkill);
+          return -1;
+        },
+      );
       _walletdProcess = null;
       _isRunning = false;
       debugPrint('Walletd stopped');
     } catch (e) {
       debugPrint('Error stopping walletd: $e');
+      _walletdProcess = null;
+      _isRunning = false;
     }
   }
 
@@ -163,6 +219,9 @@ class WalletDaemonService {
 
   /// Get current network configuration
   static NetworkConfig get networkConfig => _networkConfig;
+
+  /// Get recent log output
+  static List<String> get recentLogs => List.unmodifiable(_logBuffer);
 
   /// Restart walletd with new parameters
   static Future<bool> restartWalletd({
@@ -183,15 +242,25 @@ class WalletDaemonService {
       throw Exception('WalletDaemonService not initialized');
     }
 
+    if (_walletdPath!.isEmpty) {
+      debugPrint('Skipping walletd create: running in UI-only/external RPC mode');
+      return true; // We pretend success in UI-only mode
+    }
+
     try {
       final List<String> args = [
         '--daemon-address', '$_daemonAddress',
-        '--daemon-port', '$_daemonPort.toString()',
+        '--daemon-port', '$_daemonPort',
         '--wallet-file', walletPath,
         '--password', password,
         '--generate-new-wallet',
         '--non-interactive',
       ];
+
+      // Add testnet flag if applicable
+      if (_networkConfig.isTestnet) {
+        args.add('--testnet');
+      }
 
       debugPrint('Creating wallet with args: $args');
 
@@ -219,5 +288,24 @@ class WalletDaemonService {
       walletPath: walletPath,
       password: password,
     );
+  }
+
+  /// Update network configuration (requires restart)
+  static Future<void> updateNetworkConfig(NetworkConfig config) async {
+    final wasRunning = _isRunning;
+    if (wasRunning) {
+      await stopWalletd();
+    }
+    _networkConfig = config;
+    if (wasRunning && _walletPath != null) {
+      await startWalletd(walletPath: _walletPath);
+    }
+  }
+
+  static void _appendLog(String line) {
+    _logBuffer.add('${DateTime.now().toIso8601String()} $line');
+    if (_logBuffer.length > _maxLogLines) {
+      _logBuffer.removeRange(0, _logBuffer.length - _maxLogLines);
+    }
   }
 }

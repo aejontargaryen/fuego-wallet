@@ -1,11 +1,21 @@
+// Copyright (c) 2025-2026 Fuego Developers
+// Copyright (c) 2025-2026 Elderfire Privacy Group
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:logging/logging.dart';
 import '../models/wallet.dart';
 import '../models/network_config.dart';
+import '../models/fuego_constants.dart';
+import '../models/deposit_model.dart';
+import '../models/fee_pool_model.dart';
+import '../models/swap_model.dart';
+import '../models/supply_stats_model.dart';
+import '../models/alias_model.dart';
 import '../services/fuego_rpc_service.dart';
 import '../services/security_service.dart';
+import '../services/cli_service.dart';
 
 class WalletProvider extends ChangeNotifier {
   static final Logger _logger = Logger('WalletProvider');
@@ -14,7 +24,6 @@ class WalletProvider extends ChangeNotifier {
   
   Wallet? _wallet;
   List<WalletTransaction> _transactions = [];
-  List<ElderfierNode> _elderfierNodes = [];
   bool _isLoading = false;
   bool _isConnected = false;
   bool _isSyncing = false;
@@ -31,18 +40,40 @@ class WalletProvider extends ChangeNotifier {
   // Network status
   ConnectivityResult _connectivityResult = ConnectivityResult.none;
 
+  // ── CD/Deposit State ──
+  List<DepositModel> _deposits = [];
+  bool _depositsLoading = false;
+
+  // ── Fee Pool State ──
+  FeePoolModel? _feePool;
+
+  // ── Supply Stats ──
+  SupplyStats? _supplyStats;
+
+  // ── Swap State ──
+  List<SwapOffer> _swapOffers = [];
+  List<SwapTrade> _recentTrades = [];
+  SwapPrice? _currentPrice;
+
+  // ── Alias ──
+  FireAlias? _myAlias;
+
   WalletProvider({
     FuegoRPCService? rpcService,
     SecurityService? securityService,
   }) : _rpcService = rpcService ?? FuegoRPCService(),
        _securityService = securityService ?? SecurityService() {
     _initConnectivity();
+    // Wire up CLI service to use RPC
+    CLIService.setRPCService(_rpcService);
   }
 
-  // Getters
+  // ═══════════════════════════════════════════════════════════════════
+  //  GETTERS
+  // ═══════════════════════════════════════════════════════════════════
+
   Wallet? get wallet => _wallet;
   List<WalletTransaction> get transactions => _transactions;
-  List<ElderfierNode> get elderfierNodes => _elderfierNodes;
   bool get isLoading => _isLoading;
   bool get isConnected => _isConnected;
   bool get isSyncing => _isSyncing;
@@ -58,7 +89,34 @@ class WalletProvider extends ChangeNotifier {
   bool get isWalletSynced => _wallet?.synced ?? false;
   double get syncProgress => _wallet?.syncProgress ?? 0.0;
 
-  // Get private key for burn transactions (requires PIN verification)
+  // CD/Deposit getters
+  List<DepositModel> get deposits => _deposits;
+  List<DepositModel> get activeDeposits =>
+      _deposits.where((d) => d.isActive).toList();
+  List<DepositModel> get maturedDeposits =>
+      _deposits.where((d) => d.isMatured).toList();
+  List<DepositModel> get burnDeposits =>
+      _deposits.where((d) => d.isBurn).toList();
+  bool get depositsLoading => _depositsLoading;
+
+  // Fee pool getters
+  FeePoolModel? get feePool => _feePool;
+
+  // Supply getters
+  SupplyStats? get supplyStats => _supplyStats;
+
+  // Swap getters
+  List<SwapOffer> get swapOffers => _swapOffers;
+  List<SwapTrade> get recentTrades => _recentTrades;
+  SwapPrice? get currentPrice => _currentPrice;
+
+  // Alias getter
+  FireAlias? get myAlias => _myAlias;
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  PRIVATE KEY ACCESS (requires PIN)
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<String?> getPrivateKeyForBurn(String pin) async {
     try {
       _logger.info('Attempting to get private key for burn transaction');
@@ -76,7 +134,6 @@ class WalletProvider extends ChangeNotifier {
       }
 
       _logger.info('Private key accessed successfully for burn transaction');
-      // Return the spend key as the private key for burn transactions
       return keys['spendKey'];
     } catch (e) {
       _logger.severe('Failed to get private key: $e');
@@ -85,37 +142,31 @@ class WalletProvider extends ChangeNotifier {
     }
   }
 
-  // Get private key without PIN verification (for internal use when wallet is unlocked)
   String? getPrivateKey() {
     if (_wallet == null) {
       _setError('Wallet not loaded');
       return null;
     }
-    
-    // Only return private key if wallet is synced and unlocked
     if (!isWalletSynced) {
       _setError('Wallet must be synced to access private key');
       return null;
     }
-    
     return _wallet?.spendKey;
   }
 
-  // Validate private key format (basic validation)
   bool isValidPrivateKey(String privateKey) {
-    // Basic validation - in real implementation, this would validate against Fuego key format
     return privateKey.isNotEmpty && privateKey.length >= 32;
   }
 
-  // Clear sensitive data from memory
   void clearSensitiveData() {
-    // In a real implementation, this would securely clear memory
-    // For now, we'll just clear the wallet reference
     _wallet = null;
     notifyListeners();
   }
 
-  // Initialize connectivity monitoring
+  // ═══════════════════════════════════════════════════════════════════
+  //  CONNECTIVITY
+  // ═══════════════════════════════════════════════════════════════════
+
   void _initConnectivity() {
     Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
       _connectivityResult = result;
@@ -130,7 +181,10 @@ class WalletProvider extends ChangeNotifier {
     });
   }
 
-  // Wallet Management
+  // ═══════════════════════════════════════════════════════════════════
+  //  WALLET MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<bool> createWallet({
     required String pin,
     String? mnemonic,
@@ -145,14 +199,13 @@ class WalletProvider extends ChangeNotifier {
         throw Exception('Invalid mnemonic phrase');
       }
 
-      // Store mnemonic securely
       await _securityService.storeWalletSeed(seed, pin);
       await _securityService.setPIN(pin);
 
-      // TODO: Derive keys from the mnemonic
-      // For now, we'll simulate this process
-      final viewKey = 'view_key_placeholder_${DateTime.now().millisecondsSinceEpoch}';
-      final spendKey = 'spend_key_placeholder_${DateTime.now().millisecondsSinceEpoch}';
+      // TODO: Derive real CryptoNote keys from mnemonic via Rust FFI
+      // This is a critical security item — placeholder keys are NOT safe
+      const viewKey = 'view_key_pending_derivation';
+      const spendKey = 'spend_key_pending_derivation';
       
       await _securityService.storeWalletKeys(
         viewKey: viewKey,
@@ -181,13 +234,12 @@ class WalletProvider extends ChangeNotifier {
         throw Exception('Invalid mnemonic phrase');
       }
 
-      // Store mnemonic and create PIN
       await _securityService.storeWalletSeed(mnemonic, pin);
       await _securityService.setPIN(pin);
 
-      // TODO Derive keys from mnemonic (placeholder implementation)
-      final viewKey = 'restored_view_key_${DateTime.now().millisecondsSinceEpoch}';
-      final spendKey = 'restored_spend_key_${DateTime.now().millisecondsSinceEpoch}';
+      // TODO: Derive real CryptoNote keys from mnemonic via Rust FFI
+      const viewKey = 'restored_view_key_pending_derivation';
+      const spendKey = 'restored_spend_key_pending_derivation';
       
       await _securityService.storeWalletKeys(
         viewKey: viewKey,
@@ -219,8 +271,6 @@ class WalletProvider extends ChangeNotifier {
         throw Exception('Wallet keys not found');
       }
 
-      // Initialize wallet with placeholder data
-      // TODO: Open wallet with the keys
       await refreshWallet();
       
       _setLoading(false);
@@ -235,6 +285,13 @@ class WalletProvider extends ChangeNotifier {
   Future<void> lockWallet() async {
     _wallet = null;
     _transactions.clear();
+    _deposits.clear();
+    _feePool = null;
+    _supplyStats = null;
+    _swapOffers.clear();
+    _recentTrades.clear();
+    _currentPrice = null;
+    _myAlias = null;
     _stopSyncTimer();
     notifyListeners();
   }
@@ -243,7 +300,10 @@ class WalletProvider extends ChangeNotifier {
     return await _securityService.hasWalletData();
   }
 
-  // Wallet Operations
+  // ═══════════════════════════════════════════════════════════════════
+  //  WALLET REFRESH
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<void> refreshWallet() async {
     if (!_isConnected) {
       await _checkConnection();
@@ -257,13 +317,11 @@ class WalletProvider extends ChangeNotifier {
       _setLoading(true);
       _clearError();
 
-      // Get wallet balance and info
       final balance = await _rpcService.getBalance();
       final address = await _rpcService.getAddress();
       
       _wallet = balance.copyWith(address: address);
       
-      // Start sync timer if not already running
       if (!isWalletSynced) {
         _startSyncTimer();
       }
@@ -286,30 +344,50 @@ class WalletProvider extends ChangeNotifier {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  SEND TRANSACTION
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<String?> sendTransaction({
     required String address,
     required double amount,
     String? paymentId,
-    int mixins = 7,
+    int? mixins,
   }) async {
     _setLoading(true);
     _clearError();
 
     try {
-      final atomicAmount = (amount * 10000000).round();
-      final fee = 10000000; // Default fee in atomic units
+      // Resolve Fire Alias if it's not a standard address
+      String resolvedAddress = address;
+      if (!address.toLowerCase().startsWith(_networkConfig.addressPrefix.toLowerCase())) {
+        try {
+          final alias = await _rpcService.getAlias(address);
+          if (alias.found) {
+            resolvedAddress = alias.address;
+          } else {
+            throw Exception('Alias "$address" not found');
+          }
+        } catch (_) {
+          // Not an alias, validate as address
+          if (!address.toLowerCase().startsWith(_networkConfig.addressPrefix.toLowerCase())) {
+            throw Exception('Invalid address or alias: "$address"');
+          }
+        }
+      }
+
+      final atomicAmount = FuegoConstants.toAtomic(amount);
       
       final request = SendTransactionRequest(
-        address: address,
+        address: resolvedAddress,
         amount: atomicAmount,
         paymentId: paymentId ?? '',
-        fee: fee,
-        mixins: mixins,
+        fee: FuegoConstants.MINIMUM_FEE,
+        mixins: mixins ?? FuegoConstants.MIN_TX_MIXIN_SIZE_V10,
       );
 
       final txHash = await _rpcService.sendTransaction(request);
       
-      // Refresh wallet after sending
       await refreshWallet();
       await refreshTransactions();
       
@@ -330,7 +408,233 @@ class WalletProvider extends ChangeNotifier {
     return await _rpcService.createIntegratedAddress(paymentId);
   }
 
-  // Mining Operations
+  // ═══════════════════════════════════════════════════════════════════
+  //  CD (FUEGOCD) OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Refresh all deposits from the wallet.
+  Future<void> refreshDeposits() async {
+    _depositsLoading = true;
+    notifyListeners();
+
+    try {
+      _deposits = await _rpcService.getAllDeposits();
+      _depositsLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _depositsLoading = false;
+      _setError('Failed to refresh deposits: $e');
+    }
+  }
+
+  /// Create a new FuegoCD.
+  Future<String?> createDeposit({
+    required int amount,
+    required int term,
+  }) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      final address = await _rpcService.getAddress();
+
+      final response = await _rpcService.createDeposit(
+        amount: amount,
+        term: term,
+        sourceAddress: address,
+      );
+
+      final txHash = response['transactionHash'] as String?;
+
+      await refreshWallet();
+      await refreshDeposits();
+
+      _setLoading(false);
+      return txHash;
+    } catch (e) {
+      _setError(e.toString());
+      _setLoading(false);
+      return null;
+    }
+  }
+
+  /// Withdraw a matured CD + interest.
+  Future<String?> withdrawDeposit(int depositId) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      final txHash = await _rpcService.withdrawDeposit(depositId);
+
+      await refreshWallet();
+      await refreshDeposits();
+
+      _setLoading(false);
+      return txHash;
+    } catch (e) {
+      _setError(e.toString());
+      _setLoading(false);
+      return null;
+    }
+  }
+
+  /// Estimate yield for a prospective CD.
+  Future<Map<String, dynamic>?> estimateCDYield({
+    required int amount,
+    int? currentHeight,
+  }) async {
+    try {
+      return await _rpcService.estimateCDYield(
+        amount: amount,
+        creationHeight: currentHeight ?? (_wallet?.blockchainHeight ?? 0),
+      );
+    } catch (e) {
+      _setError('Failed to estimate yield: $e');
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  BURN (HEAT MINTING) OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Execute a standard burn (0.8 XFG → HEAT).
+  Future<String?> burnStandard() async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      final address = await _rpcService.getAddress();
+      final result = await CLIService.executeStandardBurn(
+        sourceAddress: address,
+      );
+
+      await refreshWallet();
+      await refreshDeposits();
+
+      _setLoading(false);
+      return result.transactionHash;
+    } catch (e) {
+      _setError(e.toString());
+      _setLoading(false);
+      return null;
+    }
+  }
+
+  /// Execute a large burn (800 XFG → HEAT).
+  Future<String?> burnLarge() async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      final address = await _rpcService.getAddress();
+      final result = await CLIService.executeLargeBurn(
+        sourceAddress: address,
+      );
+
+      await refreshWallet();
+      await refreshDeposits();
+
+      _setLoading(false);
+      return result.transactionHash;
+    } catch (e) {
+      _setError(e.toString());
+      _setLoading(false);
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  FEE POOL & SUPPLY
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Refresh fee pool info from daemon.
+  Future<void> refreshFeePool() async {
+    try {
+      _feePool = await _rpcService.getFeePoolInfo();
+      notifyListeners();
+    } catch (e) {
+      // Fee pool may not be available on all nodes
+      _logger.warning('Failed to fetch fee pool: $e');
+    }
+  }
+
+  /// Refresh dynamic supply overview.
+  Future<void> refreshSupplyStats() async {
+    try {
+      _supplyStats = await _rpcService.getDynamicSupplyOverview();
+      notifyListeners();
+    } catch (e) {
+      _logger.warning('Failed to fetch supply stats: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  SWAP OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Refresh swap offers for a given pair.
+  Future<void> refreshSwapOffers(SwapPair pair) async {
+    try {
+      _swapOffers = await _rpcService.getSwapOffers(pair);
+      notifyListeners();
+    } catch (e) {
+      _logger.warning('Failed to fetch swap offers: $e');
+    }
+  }
+
+  /// Refresh recent trades for a given pair.
+  Future<void> refreshRecentTrades(SwapPair pair, {int limit = 50}) async {
+    try {
+      _recentTrades = await _rpcService.getSwapTrades(pair, limit: limit);
+      notifyListeners();
+    } catch (e) {
+      _logger.warning('Failed to fetch trades: $e');
+    }
+  }
+
+  /// Refresh swap price for a given pair.
+  Future<void> refreshSwapPrice(SwapPair pair) async {
+    try {
+      _currentPrice = await _rpcService.getSwapPrice(pair);
+      notifyListeners();
+    } catch (e) {
+      _logger.warning('Failed to fetch swap price: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  FIRE ALIAS OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Resolve a Fire Alias to an address.
+  Future<FireAlias?> resolveAlias(String alias) async {
+    try {
+      final result = await _rpcService.getAlias(alias);
+      return result.found ? result : null;
+    } catch (e) {
+      _logger.warning('Failed to resolve alias: $e');
+      return null;
+    }
+  }
+
+  /// Look up alias for current wallet address.
+  Future<void> refreshMyAlias() async {
+    if (_wallet?.address == null || _wallet!.address.isEmpty) return;
+
+    try {
+      final result = await _rpcService.getAliasByAddress(_wallet!.address);
+      _myAlias = result.found ? result : null;
+      notifyListeners();
+    } catch (e) {
+      // User may not have an alias
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  MINING OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<void> startMining({int threads = 1}) async {
     try {
       _miningThreads = threads;
@@ -366,56 +670,24 @@ class WalletProvider extends ChangeNotifier {
       _miningThreads = status['threads'] as int;
       notifyListeners();
     } catch (e) {
-      // Mining might not be supported, ignore errors
+      // Mining might not be supported
     }
   }
 
-  // Elderfier Operations
-  Future<void> refreshElderfierNodes() async {
-    try {
-      final nodes = await _rpcService.getElderfierNodes();
-      _elderfierNodes = nodes;
-      notifyListeners();
-    } catch (e) {
-      // Elderfier functionality might not be available
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  //  CONNECTION MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════
 
-  Future<bool> registerElderfierNode({
-    required String customName,
-    required String address,
-    required double stakeAmount,
-  }) async {
-    try {
-      final atomicStake = (stakeAmount * 10000000).round();
-      final success = await _rpcService.registerElderfierNode(
-        customName: customName,
-        address: address,
-        stakeAmount: atomicStake,
-      );
-      
-      if (success) {
-        await refreshElderfierNodes();
-      }
-      
-      return success;
-    } catch (e) {
-      _setError('Failed to register Elderfier node: $e');
-      return false;
-    }
-  }
-
-  // Connection Management
   Future<void> connectToNode(String url) async {
     _setLoading(true);
 
     try {
-      // Parse the URL to extract host and port
       final uri = Uri.parse(url);
       final host = uri.host;
-      final port = uri.port == 80 || uri.port == 443 ? _networkConfig.daemonRpcPort : uri.port;
+      final port = uri.port == 80 || uri.port == 443
+          ? _networkConfig.daemonRpcPort
+          : uri.port;
 
-      // Update the RPC service with new node
       _rpcService.updateNode(host, port: port);
       _nodeUrl = url;
 
@@ -431,12 +703,10 @@ class WalletProvider extends ChangeNotifier {
     _setLoading(false);
   }
 
-  /// Update network configuration
   Future<void> updateNetworkConfig(NetworkConfig config) async {
     _networkConfig = config;
     _rpcService.updateNetworkConfig(config);
     
-    // Update node URL if it's using the old port
     if (_nodeUrl != null) {
       final uri = Uri.parse(_nodeUrl!);
       final newUrl = '${uri.scheme}://${uri.host}:${config.daemonRpcPort}';
@@ -455,7 +725,62 @@ class WalletProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Timer Management
+  // ═══════════════════════════════════════════════════════════════════
+  //  MESSAGING
+  // ═══════════════════════════════════════════════════════════════════
+
+  Future<bool> sendMessage({
+    required String recipientAddress,
+    required String message,
+    bool selfDestruct = false,
+    int? destructTime,
+  }) async {
+    try {
+      final success = await _rpcService.sendMessage(
+        recipientAddress: recipientAddress,
+        message: message,
+        selfDestruct: selfDestruct,
+        destructTime: destructTime,
+      );
+      return success;
+    } catch (e) {
+      _setError('Failed to send message: $e');
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> loadMessages() async {
+    try {
+      final messages = await _rpcService.getMessages();
+      return messages.map((msg) {
+        return {
+          'id': msg['id'] ?? '',
+          'type': msg['type'] ?? 'received',
+          'address': msg['address'] ?? '',
+          'content': msg['content'] ?? '',
+          'preview': _generateMessagePreview(msg['content'] as String? ?? ''),
+          'timestamp': msg['timestamp'] ?? DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          'unread': msg['unread'] ?? false,
+          'self_destruct': msg['self_destruct'] ?? false,
+          'attachment': msg['attachment'] ?? false,
+        };
+      }).toList();
+    } catch (e) {
+      _setError('Failed to load messages: $e');
+      return [];
+    }
+  }
+
+  String _generateMessagePreview(String content) {
+    if (content.isEmpty) return 'Encrypted message';
+    if (content.length <= 50) return content;
+    return '${content.substring(0, 50)}...';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  TIMERS
+  // ═══════════════════════════════════════════════════════════════════
+
   void _startSyncTimer() {
     if (_syncTimer?.isActive == true) return;
     
@@ -495,7 +820,7 @@ class WalletProvider extends ChangeNotifier {
         _wallet = _wallet!.copyWith(
           blockchainHeight: info['height'] as int,
           localHeight: balance.localHeight,
-          synced: (info['height'] - balance.localHeight) <= 1,
+          synced: ((info['height'] as int) - balance.localHeight) <= 1,
         );
       }
       
@@ -507,65 +832,10 @@ class WalletProvider extends ChangeNotifier {
     }
   }
 
-  // Messaging Operations
-  Future<bool> sendMessage({
-    required String recipientAddress,
-    required String message,
-    bool selfDestruct = false,
-    int? destructTime,
-  }) async {
-    try {
-      final success = await _rpcService.sendMessage(
-        recipientAddress: recipientAddress,
-        message: message,
-        selfDestruct: selfDestruct,
-        destructTime: destructTime,
-      );
-      
-      if (success) {
-        // Message sent successfully
-        return true;
-      } else {
-        _setError('Failed to send message');
-        return false;
-      }
-    } catch (e) {
-      _setError('Failed to send message: $e');
-      return false;
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  //  HELPERS
+  // ═══════════════════════════════════════════════════════════════════
 
-  Future<List<Map<String, dynamic>>> loadMessages() async {
-    try {
-      final messages = await _rpcService.getMessages();
-      
-      // Transform messages for UI consumption
-      return messages.map((msg) {
-        return {
-          'id': msg['id'] ?? '',
-          'type': msg['type'] ?? 'received', // 'received' or 'sent'
-          'address': msg['address'] ?? '',
-          'content': msg['content'] ?? '',
-          'preview': _generateMessagePreview(msg['content'] as String? ?? ''),
-          'timestamp': msg['timestamp'] ?? DateTime.now().millisecondsSinceEpoch ~/ 1000,
-          'unread': msg['unread'] ?? false,
-          'self_destruct': msg['self_destruct'] ?? false,
-          'attachment': msg['attachment'] ?? false,
-        };
-      }).toList();
-    } catch (e) {
-      _setError('Failed to load messages: $e');
-      return [];
-    }
-  }
-
-  String _generateMessagePreview(String content) {
-    if (content.isEmpty) return 'Encrypted message';
-    if (content.length <= 50) return content;
-    return '${content.substring(0, 50)}...';
-  }
-
-  // Helper methods
   void _setLoading(bool loading) {
     _isLoading = loading;
     notifyListeners();

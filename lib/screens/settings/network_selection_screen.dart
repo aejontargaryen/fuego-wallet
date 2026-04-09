@@ -76,14 +76,14 @@ class _NetworkSelectionScreenState extends State<NetworkSelectionScreen> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.orange.withOpacity(0.3)),
                 ),
-                child: Column(
+                child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.info_outline, color: Colors.orange),
-                        const SizedBox(width: 8),
-                        const Text(
+                        Icon(Icons.info_outline, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text(
                           'Testnet Information',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
@@ -92,24 +92,14 @@ class _NetworkSelectionScreenState extends State<NetworkSelectionScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
+                    SizedBox(height: 8),
+                    Text(
                       '• Test tokens have no real value\n'
                       '• Perfect for testing and development\n'
                       '• Faster block times for testing\n'
                       '• Separate from mainnet funds',
                       style: TextStyle(color: AppTheme.textSecondary),
                     ),
-                    if (_selectedNetwork.faucetUrl != null) ...[
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: () {
-                          // TODO: Open faucet URL
-                        },
-                        icon: const Icon(Icons.water_drop),
-                        label: const Text('Get Test Tokens'),
-                      ),
-                    ],
                   ],
                 ),
               ),

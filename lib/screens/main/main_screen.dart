@@ -1,11 +1,13 @@
+// Copyright (c) 2025-2026 Fuego Developers
+// Copyright (c) 2025-2026 Elderfire Privacy Group
+
 import 'package:flutter/material.dart';
 import '../../utils/theme.dart';
 import '../home/home_screen.dart';
-import '../elderfier/elderfier_screen.dart';
 import '../messaging/messaging_screen.dart';
 import '../banking/banking_screen.dart';
+import '../swap/swap_screen.dart';
 import '../settings/settings_screen.dart';
-import '../banking/burn_deposits_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -21,9 +23,8 @@ class _MainScreenState extends State<MainScreen> {
     const HomeScreen(),
     const MessagingScreen(),
     const BankingScreen(),
-    const BurnDepositsScreen(),
+    const SwapScreen(),
     const SettingsScreen(),
-    const ElderfierScreen(),
   ];
 
   @override
@@ -61,23 +62,18 @@ class _MainScreenState extends State<MainScreen> {
                 ),
                 _buildNavItem(
                   icon: Icons.account_balance,
-                  label: 'Banking',
+                  label: 'Vault',
                   index: 2,
                 ),
                 _buildNavItem(
-                  icon: Icons.local_fire_department,
-                  label: 'Mint Ξmbers',
+                  icon: Icons.swap_calls,
+                  label: 'Swap',
                   index: 3,
                 ),
                 _buildNavItem(
                   icon: Icons.settings,
                   label: 'Settings',
                   index: 4,
-                ),
-                _buildNavItem(
-                  icon: Icons.account_tree,
-                  label: 'Elderfiers',
-                  index: 5,
                 ),
               ],
             ),
